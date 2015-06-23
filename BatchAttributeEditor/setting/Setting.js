@@ -643,6 +643,8 @@ define([
               }
           },
           createFieldsTable: function () {
+              if (this.commonFieldsTable != null)
+                  return;
               var commonFields = [{
                   name: 'isEditable',
                   title: this.nls.page3.fieldTable.colEdit,

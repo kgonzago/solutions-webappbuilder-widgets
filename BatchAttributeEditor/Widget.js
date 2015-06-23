@@ -145,7 +145,15 @@ function (declare,
             }
         },
         _configureWidget: function () {
-
+            this.existingText = {};
+            this.existingText.addPoint = esri.bundle.toolbars.draw.addPoint;
+            this.existingText.addShape = esri.bundle.toolbars.draw.addShape;
+            this.existingText.freehand = esri.bundle.toolbars.draw.freehand;
+            this.existingText.start = esri.bundle.toolbars.draw.start;
+                  esri.bundle.toolbars.draw.addPoint = "Click to select in this area";
+                  esri.bundle.toolbars.draw.addShape = "Draw a shape to select features";
+                  esri.bundle.toolbars.draw.freehand = "Press and hold to draw a shape to select features";
+                  esri.bundle.toolbars.draw.start = "Draw a shape to select features";
             var types = null;
             if (this.config.selectByShape === true) {
                 this.toolType = "Area";
@@ -188,7 +196,7 @@ function (declare,
                 this.drawBox.setMap(this.map);
 
                 this.own(on(this.drawBox, 'DrawEnd', lang.hitch(this, this._onDrawEnd)));
-
+              
             } else {
 
                 this.searchTextBox = new dijit.form.TextBox({
@@ -220,38 +228,64 @@ function (declare,
             });
         },
         _selectInShape: function (shape, searchValue) {
+            this._clearResults(true);
             var defs = {};
             var q = new EsriQuery();
             if (shape !== null) {
                 q.geometry = shape;
             }
             var fields;
+            var selectedLayers = []
+            array.forEach(this.layersTable.getRows(), function (row) {
+
+                rowData = this.layersTable.getRowData(row);
+                if (rowData.isSelectable == true) {
+                    selectedLayers.push(rowData.label);
+                }
+            }, this);
             q.spatialRelationship = EsriQuery.SPATIAL_REL_INTERSECTS;
             array.forEach(this.updateLayers, function (layer) {
-                if (searchValue) {
-                    fields = this._findField(layer.layerObject.fields, layer.queryField);
-                    if (fields) {
-                        if (fields.length > 0) {
-                            if (fields[0].type === "esriFieldTypeString") {
-                                q.where = layer.queryField.toString() + " = '" +
-                                    searchValue.toString() + "'";
+                if (selectedLayers.indexOf(layer.title) >= 0 || selectedLayers.indexOf(layer.layerObject.name) >= 0) {
+                    if (searchValue) {
+                        fields = this._findField(layer.layerObject.fields, layer.queryField);
+                        if (fields) {
+                            if (fields.length > 0) {
+                                if (fields[0].type === "esriFieldTypeString") {
+                                    q.where = layer.queryField.toString() + " = '" +
+                                        searchValue.toString() + "'";
+                                } else {
+                                    q.where = layer.queryField.toString() + " = " +
+                                        searchValue.toString() + "";
+                                }
                             } else {
-                                q.where = layer.queryField.toString() + " = " +
-                                    searchValue.toString() + "";
+                                console.log("field not found in layer");
                             }
                         } else {
                             console.log("field not found in layer");
                         }
-                    } else {
-                        console.log("field not found in layer");
                     }
+                    var def = layer.layerObject.selectFeatures(q, FeatureLayer.SELECTION_NEW);
+                    //var sym = layer.layerObject.getSelectionSymbol();
+                    defs[layer.id] = def;
                 }
-                var def = layer.layerObject.selectFeatures(q, FeatureLayer.SELECTION_NEW);
-                //var sym = layer.layerObject.getSelectionSymbol();
-                defs[layer.id] = def;
             }, this);
-            all(defs).then(lang.hitch(this, this._layerQueriesComplete));
+            if (this.isEmptyObject(defs)) {
+                this.loading.hide();
+            }
+            else {
+                all(defs).then(lang.hitch(this, this._layerQueriesComplete));
 
+
+            }
+
+        },
+        isEmptyObject: function (obj) {
+            for (var prop in obj) {
+                if (Object.prototype.hasOwnProperty.call(obj, prop)) {
+                    return false;
+                }
+            }
+            return true;
         },
         _selectSearchLayer: function (shape) {
             var q = new EsriQuery();
@@ -287,7 +321,7 @@ function (declare,
                 // this._togglePanelLoadingIcon();
             }
         },
-        _clearRowHighlight: function () {
+        _clearRowHighlight: function (clearResultMessage) {
 
             var labelCell;
             var countCell;
@@ -301,7 +335,11 @@ function (declare,
                 html.removeClass(countCell, 'maxRecordCount');
                 html.removeClass(syncCell, 'syncComplete');
                 html.removeClass(syncCell, 'syncProcessing');
+                html.removeClass(syncCell, 'syncSkipped');
             }, this);
+            if (clearResultMessage === true) {
+                this.resultsMessage.innerHTML = "";
+            }
         },
         _layerQueriesComplete: function (results) {
             var features = [];
@@ -315,27 +353,29 @@ function (declare,
             array.forEach(this.layersTable.getRows(), function (row) {
 
                 rowData = this.layersTable.getRowData(row);
-                layerRes = results[rowData.ID];
-                layer = this.map.getLayer(rowData.ID);
-                features = features.concat(layerRes);
-                editData = { numSelected: layerRes.length.toString() };
+                if (results.hasOwnProperty(rowData.ID)) {
+                    layerRes = results[rowData.ID];
+                    layer = this.map.getLayer(rowData.ID);
+                    features = features.concat(layerRes);
+                    editData = { numSelected: layerRes.length.toString() };
 
-                this.layersTable.editRow(row, editData);
-                labelCell = query('.label', row).shift();
-                countCell = query('.numSelected', row).shift();
+                    this.layersTable.editRow(row, editData);
+                    labelCell = query('.label', row).shift();
+                    countCell = query('.numSelected', row).shift();
 
-                if (layerRes.length > 0) {
-                    if (layerRes.length >= layer.maxRecordCount) {
+                    if (layerRes.length > 0) {
+                        if (layerRes.length >= layer.maxRecordCount) {
 
-                        html.addClass(labelCell, 'maxRecordCount');
-                        html.addClass(countCell, 'maxRecordCount');
+                            html.addClass(labelCell, 'maxRecordCount');
+                            html.addClass(countCell, 'maxRecordCount');
+                        } else {
+                            html.removeClass(labelCell, 'maxRecordCount');
+                            html.removeClass(countCell, 'maxRecordCount');
+                        }
                     } else {
                         html.removeClass(labelCell, 'maxRecordCount');
                         html.removeClass(countCell, 'maxRecordCount');
                     }
-                } else {
-                    html.removeClass(labelCell, 'maxRecordCount');
-                    html.removeClass(countCell, 'maxRecordCount');
                 }
             }, this);
             this._updateSelectionCount(features.length);
@@ -462,6 +502,7 @@ function (declare,
                             this.updateLayers.push(layer);
                             label = layer.title;
                             this.layersTable.addRow({
+                                isSelectable: true,
                                 label: label,
                                 ID: layer.layerObject.id,
                                 numSelected: "0",
@@ -481,29 +522,36 @@ function (declare,
         },
         createLayerTable: function () {
             var layerTableFields = [
-                {
-                    name: 'numSelected',
-                    title: this.nls.layerTable.numSelected,
-                    type: 'text',
-                    'class': 'selectioncount',
-                    width: 40
-                }, {
-                    name: 'label',
-                    title: this.nls.layerTable.colLabel,
-                    type: 'text',
+               {
+                   name: 'isSelectable',
+                   title: "",
+                   type: 'checkbox',
+                   'class': 'editable',
+                   width: 25
+               }, {
+
+                   name: 'numSelected',
+                   title: this.nls.layerTable.numSelected,
+                   type: 'text',
+                   'class': 'selectioncount',
+                   width: 40
+               }, {
+                   name: 'label',
+                   title: this.nls.layerTable.colLabel,
+                   type: 'text',
 
 
-                }, {
-                    name: 'syncStatus',
-                    type: 'text',
-                    title: this.nls.layerTable.colSyncStatus,
-                    width: 80
-                }, {
-                    name: 'ID',
-                    type: 'text',
-                    hidden: true,
-                    width: 0
-                }
+               }, {
+                   name: 'syncStatus',
+                   type: 'text',
+                   title: this.nls.layerTable.colSyncStatus,
+                   width: 80
+               }, {
+                   name: 'ID',
+                   type: 'text',
+                   hidden: true,
+                   width: 0
+               }
             ];
             var args = {
                 fields: layerTableFields,
@@ -631,7 +679,7 @@ function (declare,
             array.forEach(layer.layerObject.infoTemplate.info.fieldInfos, function (field) {
 
                 if (fieldNames.indexOf(field.fieldName) > -1) {
-                    if (field.fieldName === 'OBJECTID') {
+                    if (field.fieldName.toUpperCase() === 'OBJECTID') {
                         field.isEditable = false;
                         field.visible = false;
                     } else {
@@ -651,12 +699,15 @@ function (declare,
                 'showDeleteButton': false,
                 'fieldInfos': this.helperEditFieldInfo
             }];
-
-            var attrInspector = new AttributeInspector({
-                layerInfos: layerInfos,
-                _hideNavButtons: true
-            }, domConstruct.create('div'));
-
+            try {
+                var attrInspector = new AttributeInspector({
+                    layerInfos: layerInfos,
+                    _hideNavButtons: true
+                }, domConstruct.create('div'));
+            }
+            catch (err) {
+                alert(err.message);
+            }
             var saveButton = domConstruct.create('div', {
                 'id': 'attrInspectorSaveBtn',
                 'class': 'jimu-btn',
@@ -744,69 +795,94 @@ function (declare,
             this.syncLayers = [];
 
             var rowData;
+
+            var selectedLayers = []
+            array.forEach(this.layersTable.getRows(), function (row) {
+
+                rowData = this.layersTable.getRowData(row);
+                if (rowData.isSelectable == true) {
+                    selectedLayers.push(rowData.label);
+                }
+                else {
+                    this.layersTable.editRow(row, {
+                        'syncStatus': this.nls.featuresSkipped
+                    });
+                    var cell = query('.syncStatus', row).shift();
+
+                    html.removeClass(cell, 'syncProcessing');
+                    html.removeClass(cell, 'syncComplete');
+                    html.addClass(cell, 'syncSkipped');
+                }
+            }, this);
+
+
             array.forEach(this.updateLayers, function (layer) {
-                var selectFeat = layer.layerObject.getSelectedFeatures();
-                if (selectFeat) {
+                if (selectedLayers.indexOf(layer.title) >= 0 || selectedLayers.indexOf(layer.layerObject.name) >= 0) {
 
-                    if (selectFeat.length > 0) {
-                        array.some(this.layersTable.getRows(), function (row) {
-                            rowData = this.layersTable.getRowData(row);
+                    var selectFeat = layer.layerObject.getSelectedFeatures();
+                    if (selectFeat) {
 
-                            if (rowData.ID === layer.id) {
-                                this.layersTable.editRow(row, {
-                                    'syncStatus': 0 + " / " +
-                                        selectFeat.length
-                                });
-                                var cell = query('.syncStatus', row).shift();
+                        if (selectFeat.length > 0) {
+                            array.some(this.layersTable.getRows(), function (row) {
+                                rowData = this.layersTable.getRowData(row);
 
-                                html.removeClass(cell, 'syncComplete');
-                                html.addClass(cell, 'syncProcessing');
-                                return true;
+                                if (rowData.ID === layer.id) {
+                                    this.layersTable.editRow(row, {
+                                        'syncStatus': 0 + " / " +
+                                            selectFeat.length
+                                    });
+                                    var cell = query('.syncStatus', row).shift();
+
+                                    html.removeClass(cell, 'syncComplete');
+                                    html.removeClass(cell, 'syncSkipped');
+                                    html.addClass(cell, 'syncProcessing');
+                                    return true;
+                                }
+
+                            }, this);
+
+                            var idx;
+                            var max_chunk = 300;
+                            var chunks;
+                            var bins;
+                            if (selectFeat.length > max_chunk) {
+
+                                bins = parseInt(selectFeat.length / max_chunk, 10);
+                                if (selectFeat.length % max_chunk > 0) {
+                                    bins += 1;
+                                }
+                                chunks = this._chunks(selectFeat, bins);
+                                idx = 0;
+                                syncDet = new layerSyncDetails(
+                                    {
+                                        "layerID": layer.id,
+                                        "numberOfRequest": bins,
+                                        "totalRecordsToSync": selectFeat.length
+
+                                    });
+                                on(syncDet, "complete", lang.hitch(this, this._syncComplete));
+                                on(syncDet, "requestComplete", lang.hitch(this, this._requestComplete));
+                                this.syncLayers.push(syncDet);
+
+                                this.applyCallback(chunks, idx, layer, syncDet);
+
+                            } else {
+                                chunks = [selectFeat];
+                                idx = 0;
+                                syncDet = new layerSyncDetails(
+                                   {
+                                       "layerID": layer.id,
+                                       "numberOfRequest": 1,
+                                       "totalRecordsToSync": selectFeat.length
+
+                                   });
+                                on(syncDet, "complete", lang.hitch(this, this._syncComplete));
+                                on(syncDet, "requestComplete", lang.hitch(this, this._requestComplete));
+
+                                this.syncLayers.push(syncDet);
+                                this.applyCallback(chunks, idx, layer, syncDet);
+
                             }
-
-                        }, this);
-
-                        var idx;
-                        var max_chunk = 300;
-                        var chunks;
-                        var bins;
-                        if (selectFeat.length > max_chunk) {
-
-                            bins = parseInt(selectFeat.length / max_chunk, 10);
-                            if (selectFeat.length % max_chunk > 0) {
-                                bins += 1;
-                            }
-                            chunks = this._chunks(selectFeat, bins);
-                            idx = 0;
-                            syncDet = new layerSyncDetails(
-                                {
-                                    "layerID": layer.id,
-                                    "numberOfRequest": bins,
-                                    "totalRecordsToSync": selectFeat.length
-
-                                });
-                            on(syncDet, "complete", lang.hitch(this, this._syncComplete));
-                            on(syncDet, "requestComplete", lang.hitch(this, this._requestComplete));
-                            this.syncLayers.push(syncDet);
-
-                            this.applyCallback(chunks, idx, layer, syncDet);
-
-                        } else {
-                            chunks = [selectFeat];
-                            idx = 0;
-                            syncDet = new layerSyncDetails(
-                               {
-                                   "layerID": layer.id,
-                                   "numberOfRequest": 1,
-                                   "totalRecordsToSync": selectFeat.length
-
-                               });
-                            on(syncDet, "complete", lang.hitch(this, this._syncComplete));
-                            on(syncDet, "requestComplete", lang.hitch(this, this._requestComplete));
-
-                            this.syncLayers.push(syncDet);
-                            this.applyCallback(chunks, idx, layer, syncDet);
-
                         }
                     }
                 }
@@ -855,7 +931,7 @@ function (declare,
 
                 });
                 this._updateUpdatedFeaturesCount(totalComplete, total);
-                this._clearResults();
+                this._clearResults(false);
 
                 //this._togglePanelLoadingIcon();
                 this.loading.hide();
@@ -876,9 +952,11 @@ function (declare,
                     if (args.countSoFar === args.totalToSync) {
                         html.removeClass(cell, 'syncProcessing');
                         html.addClass(cell, 'syncComplete');
+                        html.removeClass(cell, 'syncSkipped');
                     } else {
                         html.removeClass(cell, 'syncComplete');
                         html.addClass(cell, 'syncProcessing');
+                        html.removeClass(cell, 'syncSkipped');
                     }
                     return true;
                 }
@@ -919,7 +997,10 @@ function (declare,
                 }
             }, this);
         },
-        _clearResults: function () {
+        _clearResults: function (clearResultMessage) {
+            if (clearResultMessage === null) {
+                clearResultMessage = true;
+            }
             array.forEach(this.updateLayers, function (layer) {
                 layer.layerObject.clearSelection();
 
@@ -936,7 +1017,7 @@ function (declare,
 
             }, this);
             this._hideInfoWindow();
-            this._clearRowHighlight();
+            this._clearRowHighlight(clearResultMessage);
         },
         _updateUpdatedFeaturesCount: function (count, total) {
             this.resultsMessage.innerHTML = string.substitute(this.nls.featuresUpdated, {
@@ -962,6 +1043,11 @@ function (declare,
         onOpen: function () {
 
             this.disableWebMapPopup();
+         
+            esri.bundle.toolbars.draw.addPoint = this.nls.drawBox.addPointToolTip;
+            esri.bundle.toolbars.draw.addShape  = this.nls.drawBox.addShapeToolTip;
+            esri.bundle.toolbars.draw.freehand  = this.nls.drawBox.freehandToolTip;
+            esri.bundle.toolbars.draw.start  = this.nls.drawBox.startToolTip;
             if (this.config.toggleLayersOnOpen == true) {
                 array.forEach(this.updateLayers, function (layer) {
                     layer.layerObject.setVisibility(true);
@@ -969,6 +1055,11 @@ function (declare,
             }
         },
         onClose: function () {
+            esri.bundle.toolbars.draw.addPoint =   this.existingText.addPoint ;
+            esri.bundle.toolbars.draw.addShape = this.existingText.addShape;
+            esri.bundle.toolbars.draw.freehand = this.existingText.freehand;
+            esri.bundle.toolbars.draw.start = this.existingText.start;
+          
             this.enableWebMapPopup();
             if (this.config.toggleLayersOnOpen == true) {
                 array.forEach(this.updateLayers, function (layer) {
